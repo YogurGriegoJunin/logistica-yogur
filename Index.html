@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reparto Yogur Griego - Junín</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1d4ed8">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2921/2921820.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+        body { -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, sans-serif; }
+        #map { height: 30vh; width: 100%; border-radius: 1.25rem; z-index: 1; }
+        .app-container { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        .content-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 overflow-hidden">
+
+    <div class="app-container">
+        <header class="bg-blue-700 text-white p-4 pt-6 shadow-md shrink-0">
+            <div class="max-w-xl mx-auto flex justify-between items-center">
+                <div>
+                    <h1 class="text-lg font-bold">Yogur Griego Junín</h1>
+                    <p class="text-[9px] opacity-70 uppercase tracking-widest font-semibold">Gestión de Clientes y Ruta</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="content-scroll">
+            <div class="max-w-xl mx-auto p-4 space-y-4 pb-28">
+                
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                    <div class="space-y-2">
+                        <input type="text" id="address-input" list="client-suggestions" autocomplete="off" placeholder="Dirección (ej: Saavedra 123)" 
+                               class="w-full px-4 py-3 bg-slate-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                               oninput="checkClientDirectory(this.value)">
+                        <datalist id="client-suggestions"></datalist>
+                        
+                        <div class="flex gap-2">
+                            <input type="text" id="name-input" placeholder="Nombre y Apellido" 
+                                   class="flex-1 px-4 py-3 bg-slate-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <input type="tel" id="phone-input" placeholder="WhatsApp" 
+                                   class="flex-1 px-4 py-3 bg-slate-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                    </div>
+                    <button onclick="searchAndAdd()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                        AÑADIR AL RECORRIDO
+                    </button>
+                    <div class="flex gap-2">
+                        <button onclick="setSearchAsOrigin()" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-[10px] font-bold uppercase">Setear como Inicio</button>
+                        <button onclick="optimizeRoute()" class="flex-1 bg-green-600 text-white py-2 rounded-lg text-[10px] font-bold uppercase shadow-md">Optimizar Orden</button>
+                    </div>
+                </div>
+
+                <div id="origin-box" class="hidden bg-blue-50 border border-blue-100 p-3 rounded-xl flex items-center justify-between animate-fade-in">
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <div class="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                        <span id="origin-display-text" class="text-xs font-bold text-blue-800 truncate">Inicio: No definido</span>
+                    </div>
+                    <button onclick="clearOrigin()" class="text-blue-400 p-1">✕</button>
+                </div>
+
+                <div id="map" class="shadow-md border-2 border-white"></div>
+
+                <div id="distance-info" class="hidden bg-slate-900 text-white p-4 rounded-2xl flex items-center justify-between animate-fade-in">
+                    <div>
+                        <p class="text-[9px] opacity-60 font-bold uppercase">Ruta del día</p>
+                        <p id="total-distance" class="text-xl font-black">0.00 km</p>
+                    </div>
+                    <button onclick="openInGoogleMaps()" class="bg-blue-600 px-4 py-2 rounded-xl font-bold text-xs shadow-lg">
+                        ABRIR GPS
+                    </button>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="font-bold text-slate-800 text-sm">Entregas (<span id="stop-count">0</span>)</h2>
+                        <button onclick="clearStops()" class="text-[10px] text-red-500 font-bold uppercase">Borrar Todo</button>
+                    </div>
+                    <ul id="stops-list" class="space-y-3"></ul>
+                    <div id="empty-state" class="py-10 text-center">
+                        <p class="text-slate-400 text-[11px]">Agregá clientes para armar la hoja de ruta.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="shrink-0 bg-white border-t border-slate-200 p-3 px-6 flex items-center justify-between safe-area-bottom">
+            <div id="route-status" class="text-[11px] font-semibold text-slate-500 uppercase">Listo</div>
+            <div class="text-[9px] font-bold text-blue-700 uppercase bg-blue-50 px-2 py-1 rounded">Agenda Inteligente</div>
+        </div>
+    </div>
+
+    <script>
+        const JUNIN_COORDS = [-34.585, -60.948];
+        const CITY_SUFFIX = ", Junín, Buenos Aires, Argentina";
+        
+        let map, originMarker = null, routeLine = null;
+        let stops = JSON.parse(localStorage.getItem('stops')) || [];
+        let origin = JSON.parse(localStorage.getItem('origin')) || null;
+        let directory = JSON.parse(localStorage.getItem('directory_v2')) || {};
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView(JUNIN_COORDS, 14);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+            updateDirectorySuggestions();
+            if (origin) setOrigin(origin, "Punto Guardado");
+            renderStopsFromStorage();
+        }
+
+        function checkClientDirectory(addr) {
+            const nameInput = document.getElementById('name-input');
+            const phoneInput = document.getElementById('phone-input');
+            if (directory[addr]) {
+                nameInput.value = directory[addr].name || "";
+                phoneInput.value = directory[addr].phone || "";
+                nameInput.classList.add('text-blue-600', 'font-bold');
+            } else {
+                nameInput.classList.remove('text-blue-600', 'font-bold');
+            }
+        }
+
+        function updateDirectorySuggestions() {
+            const list = document.getElementById('client-suggestions');
+            list.innerHTML = '';
+            Object.keys(directory).forEach(addr => {
+                const opt = document.createElement('option');
+                opt.value = addr;
+                list.appendChild(opt);
+            });
+        }
+
+        async function fetchCoord(q) {
+            const cleanQ = q.toLowerCase().replace(/\s+(y|esquina|e)\s+/g, ' & ').trim();
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanQ + CITY_SUFFIX)}&limit=1`);
+                const data = await response.json();
+                return (data && data[0]) ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } : null;
+            } catch (e) { return null; }
+        }
+
+        async function searchAndAdd(asOrigin = false) {
+            const addrIn = document.getElementById('address-input');
+            const nameIn = document.getElementById('name-input');
+            const phoneIn = document.getElementById('phone-input');
+            
+            const addr = addrIn.value.trim();
+            const name = nameIn.value.trim();
+            const phone = phoneIn.value.trim();
+
+            if (!addr) return;
+            updateStatus("Buscando...");
+
+            const res = await fetchCoord(addr);
+            if (res) {
+                if (asOrigin) {
+                    setOrigin(res, addr);
+                } else {
+                    // Guardar en agenda permanente
+                    if (name || phone) {
+                        directory[addr] = { name: name, phone: phone };
+                        localStorage.setItem('directory_v2', JSON.stringify(directory));
+                        updateDirectorySuggestions();
+                    }
+                    addStop(res, addr, name, phone);
+                }
+                addrIn.value = ''; nameIn.value = ''; phoneIn.value = '';
+                map.flyTo(res, 16);
+                updateStatus("Agregado");
+            } else {
+                alert("No encontré esa dirección en Junín.");
+                updateStatus("Error");
+            }
+        }
+
+        function setOrigin(latlng, label) {
+            if (originMarker) map.removeLayer(originMarker);
+            origin = latlng;
+            localStorage.setItem('origin', JSON.stringify(origin));
+            const redIcon = L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                iconSize: [25, 41], iconAnchor: [12, 41]
+            });
+            originMarker = L.marker(latlng, { icon: redIcon }).addTo(map);
+            document.getElementById('origin-box').classList.remove('hidden');
+            document.getElementById('origin-display-text').innerText = "Inicio: " + label;
+            updateRouteUI();
+        }
+
+        function addStop(latlng, addr, name, phone) {
+            const marker = L.marker(latlng).addTo(map);
+            stops.push({ id: Date.now(), lat: latlng.lat, lng: latlng.lng, addr: addr, name: name, phone: phone, marker: marker });
+            saveStops();
+            updateStopsList();
+            updateRouteUI();
+        }
+
+        function saveStops() {
+            const data = stops.map(s => ({ id: s.id, lat: s.lat, lng: s.lng, addr: s.addr, name: s.name, phone: s.phone }));
+            localStorage.setItem('stops', JSON.stringify(data));
+        }
+
+        function renderStopsFromStorage() {
+            stops.forEach(s => { s.marker = L.marker([s.lat, s.lng]).addTo(map); });
+            updateStopsList();
+        }
+
+        function sendWhatsApp(phone, name, address) {
+            const msg = `¡Hola ${name}! Te aviso que estoy saliendo para tu domicilio con el pedido de Yogur Griego Junín. Llego en unos minutos a ${address}.`;
+            const cleanPhone = phone.replace(/\D/g, '');
+            const finalPhone = cleanPhone.length <= 10 ? '549' + cleanPhone : cleanPhone;
+            window.open(`https://wa.me/${finalPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+        }
+
+        function updateStopsList() {
+            const list = document.getElementById('stops-list');
+            document.getElementById('stop-count').innerText = stops.length;
+            list.innerHTML = '';
+            document.getElementById('empty-state').style.display = stops.length ? 'none' : 'block';
+
+            stops.forEach((stop, index) => {
+                const li = document.createElement('li');
+                li.className = "p-3 bg-white rounded-xl border border-slate-100 shadow-sm animate-fade-in";
+                
+                let waBtn = stop.phone ? 
+                    `<button onclick="sendWhatsApp('${stop.phone}', '${stop.name}', '${stop.addr}')" class="bg-green-500 text-white p-2 rounded-lg active:scale-90">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    </button>` : '';
+
+                li.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <span class="shrink-0 w-6 h-6 bg-blue-600 text-white text-[10px] rounded-full flex items-center justify-center font-bold">${index + 1}</span>
+                            <div class="truncate">
+                                <p class="text-xs font-black text-slate-800 truncate uppercase">${stop.name || 'Cliente sin nombre'}</p>
+                                <p class="text-[10px] text-slate-500 truncate">${stop.addr}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            ${waBtn}
+                            <button onclick="removeStop(${stop.id})" class="text-slate-300 p-2">✕</button>
+                        </div>
+                    </div>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        function optimizeRoute() {
+            if (!origin || stops.length < 1) return;
+            let unvisited = [...stops], ordered = [], current = origin;
+            while (unvisited.length > 0) {
+                let nearestIdx = 0, minDist = Infinity;
+                unvisited.forEach((s, i) => {
+                    const d = Math.sqrt((current.lat - s.lat)**2 + (current.lng - s.lng)**2);
+                    if (d < minDist) { minDist = d; nearestIdx = i; }
+                });
+                ordered.push(unvisited[nearestIdx]);
+                current = unvisited[nearestIdx];
+                unvisited.splice(nearestIdx, 1);
+            }
+            stops = ordered;
+            saveStops();
+            updateStopsList();
+            drawRoute();
+        }
+
+        function drawRoute() {
+            if (routeLine) map.removeLayer(routeLine);
+            const pts = [[origin.lat, origin.lng], ...stops.map(s => [s.lat, s.lng])];
+            routeLine = L.polyline(pts, { color: '#2563eb', weight: 4, opacity: 0.5, dashArray: '5, 10' }).addTo(map);
+            map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+            updateRouteUI(true);
+        }
+
+        function updateRouteUI(isCalc = false) {
+            const div = document.getElementById('distance-info');
+            if (isCalc && stops.length > 0) {
+                div.classList.remove('hidden');
+                let t = 0; const p = [origin, ...stops];
+                for(let i=0; i<p.length-1; i++){
+                    const R=6371;
+                    const dLat=(p[i+1].lat-p[i].lat)*Math.PI/180;
+                    const dLon=(p[i+1].lng-p[i].lng)*Math.PI/180;
+                    const a=Math.sin(dLat/2)**2 + Math.cos(p[i].lat*Math.PI/180)*Math.cos(p[i+1].lat*Math.PI/180)*Math.sin(dLon/2)**2;
+                    t += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                }
+                document.getElementById('total-distance').innerText = t.toFixed(2) + " km";
+            } else { div.classList.add('hidden'); }
+        }
+
+        function openInGoogleMaps() {
+            if (!origin || !stops.length) return;
+            const originStr = `${origin.lat},${origin.lng}`;
+            const destStr = `${stops[stops.length-1].lat},${stops[stops.length-1].lng}`;
+            const waypoints = stops.slice(0, -1).map(s => `${s.lat},${s.lng}`).join('|');
+            window.open(`https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${destStr}&waypoints=${waypoints}&travelmode=driving`, '_blank');
+        }
+
+        function removeStop(id) {
+            const idx = stops.findIndex(s => s.id === id);
+            if (idx !== -1) {
+                if (stops[idx].marker) map.removeLayer(stops[idx].marker);
+                stops.splice(idx, 1);
+                saveStops();
+                updateStopsList();
+                updateRouteUI();
+            }
+        }
+
+        function clearOrigin() {
+            if (originMarker) map.removeLayer(originMarker);
+            origin = null;
+            localStorage.removeItem('origin');
+            document.getElementById('origin-box').classList.add('hidden');
+            updateRouteUI();
+        }
+
+        function clearStops() {
+            stops.forEach(s => s.marker && map.removeLayer(s.marker));
+            stops = [];
+            localStorage.removeItem('stops');
+            if (routeLine) map.removeLayer(routeLine);
+            updateStopsList();
+            updateRouteUI();
+        }
+
+        function updateStatus(m) { document.getElementById('route-status').innerText = m; }
+        function setSearchAsOrigin() { searchAndAdd(true); }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
